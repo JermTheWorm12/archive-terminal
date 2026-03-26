@@ -5,13 +5,12 @@ import os
 from copy import deepcopy
 from typing import Any
 
-import psycopg2
 from flask import Flask, jsonify, render_template_string, request, session
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "replace-this-with-a-random-secret-key")
+app.secret_key = "replace-this-with-a-random-secret-key"
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATA_FILE = "archive_data.json"
 
 INITIAL_FILE_DETAILS = {
     "Finch": """[ACCESS: O.DEPTHS // PERSONNEL FILE: FINCH]
@@ -258,98 +257,27 @@ DEFAULT_DATA = {
 }
 
 
-def get_db():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL is not set.")
-    return psycopg2.connect(DATABASE_URL)
-
-
-def normalize_loaded_data(data: dict[str, Any]) -> dict[str, Any]:
-    normalized = deepcopy(DEFAULT_DATA)
-
-    if isinstance(data, dict):
-        if isinstance(data.get("databases"), dict):
-            normalized["databases"] = data["databases"]
-        if isinstance(data.get("customNotes"), dict):
-            normalized["customNotes"] = data["customNotes"]
-        if isinstance(data.get("fileContents"), dict):
-            merged_file_contents = deepcopy(INITIAL_FILE_DETAILS)
-            merged_file_contents.update(data["fileContents"])
-            normalized["fileContents"] = merged_file_contents
-
-    return normalized
-
-
-def init_db() -> None:
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS archive_data (
-            id INTEGER PRIMARY KEY,
-            data JSONB NOT NULL
-        );
-    """)
-
-    cur.execute("SELECT id FROM archive_data WHERE id = 1;")
-    exists = cur.fetchone()
-
-    if not exists:
-        cur.execute(
-            "INSERT INTO archive_data (id, data) VALUES (1, %s::jsonb);",
-            [json.dumps(DEFAULT_DATA)],
-        )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-
 def load_data() -> dict[str, Any]:
-    conn = get_db()
-    cur = conn.cursor()
+    if not os.path.exists(DATA_FILE):
+        save_data(deepcopy(DEFAULT_DATA))
+        return deepcopy(DEFAULT_DATA)
 
-    cur.execute("SELECT data FROM archive_data WHERE id = 1;")
-    row = cur.fetchone()
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        loaded = deepcopy(DEFAULT_DATA)
 
-    if row and row[0]:
-        raw_data = row[0]
-        if isinstance(raw_data, str):
-            raw_data = json.loads(raw_data)
-        data = normalize_loaded_data(raw_data)
-    else:
-        data = deepcopy(DEFAULT_DATA)
-        cur.execute(
-            "INSERT INTO archive_data (id, data) VALUES (1, %s::jsonb) "
-            "ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data;",
-            [json.dumps(data)],
-        )
-        conn.commit()
+    for k, v in DEFAULT_DATA.items():
+        if k not in loaded:
+            loaded[k] = deepcopy(v)
 
-    cur.close()
-    conn.close()
-    return data
+    return loaded
 
 
 def save_data(data: dict[str, Any]) -> None:
-    normalized = normalize_loaded_data(data)
-
-    conn = get_db()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        INSERT INTO archive_data (id, data)
-        VALUES (1, %s::jsonb)
-        ON CONFLICT (id)
-        DO UPDATE SET data = EXCLUDED.data;
-        """,
-        [json.dumps(normalized)],
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def logged_in() -> bool:
@@ -729,9 +657,22 @@ async function loadState(){
   }
 }
 
-async function refreshState(){
+async function refreshState(keepSelection=false){
+  const selectedBefore = keepSelection ? state.selectedFile : null;
+  const fileContentBefore = keepSelection ? state.currentFileContent : "";
+  const noteBefore = keepSelection ? state.currentEditNote : "";
+  const editingBefore = keepSelection ? state.isEditingFile : false;
+
   const data = await api("/api/state");
   state = {...state, ...data.state};
+
+  if (keepSelection && selectedBefore) {
+    state.selectedFile = selectedBefore;
+    state.currentFileContent = fileContentBefore;
+    state.currentEditNote = noteBefore;
+    state.isEditingFile = editingBefore;
+  }
+
   render();
 }
 
@@ -1131,7 +1072,6 @@ function renderMain(){
 
   document.getElementById("app").innerHTML = `
     <div class="wrap">
-    
       <div class="topbar">
         <div>
           <h1 class="title">${esc(state.active_db)}_TERMINAL</h1>
@@ -1635,8 +1575,5 @@ def api_delete_file():
     return jsonify({"ok": True})
 
 
-init_db()
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
