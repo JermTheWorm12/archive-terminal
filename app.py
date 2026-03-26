@@ -1131,3 +1131,512 @@ function renderMain(){
 
   document.getElementById("app").innerHTML = `
     <div class="wrap">
+    
+      <div class="topbar">
+        <div>
+          <h1 class="title">${esc(state.active_db)}_TERMINAL</h1>
+          <p class="sub">SECURE CONNECTION ESTABLISHED // ${isAdmin ? "ADMIN OVERRIDE ACTIVE" : "STANDARD OP LEVEL"}</p>
+        </div>
+        <div class="row">
+          ${isAdmin ? `<button data-action="switch-db">SWITCH TO ${state.active_db === "TOA" ? "BV" : "TOA"}</button>` : ""}
+          <button class="danger" data-action="logout">TERMINATE</button>
+        </div>
+      </div>
+
+      <div class="layout">
+        <div class="card panel">
+          <div class="header-row">
+            <h2>SYSTEM STATUS</h2>
+          </div>
+          <div class="status">
+            <div>OPERATOR:</div><strong>${esc(isAdmin ? "ADMIN" : state.username)}</strong>
+            <div>ACCESS LEVEL:</div><strong>${esc(isAdmin ? "OMEGA-PRIME" : "OMEGA")}</strong>
+            <div>ENCRYPTION:</div><strong>256-BIT QUANTUM</strong>
+            <div>DATABASE SYNC:</div><strong>100%</strong>
+            <div>ACTIVE NODE:</div><strong>${esc(state.active_db)} ROOT</strong>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="header-row">
+            <div>
+              <h2>MAIN_DIRECTORY</h2>
+              <p class="sub">NAVIGATE THE ARCHIVAL RECORDS BELOW.</p>
+            </div>
+            ${isAdmin ? `<button data-action="add-entry">ADD ENTRY</button>` : ""}
+          </div>
+
+          <div class="tree-section">
+            ${categoriesHtml || '<div class="muted">NO CATEGORIES AVAILABLE.</div>'}
+          </div>
+        </div>
+      </div>
+
+      <div id="notice" class="notice"></div>
+    </div>
+
+    <div class="dialog-backdrop ${dialogOpen ? "open" : ""}" id="dialogBackdrop">
+      <div class="card dialog">
+        <div class="header-row">
+          <h2>📄 ${esc(selected || "")}</h2>
+          <button class="ghost" data-action="close-dialog">CLOSE</button>
+        </div>
+
+        <div class="split">
+          <div class="box">
+            <div class="box-head">
+              <h3>CORE FILE</h3>
+              ${isAdmin ? `
+                <div class="row">
+                  ${
+                    state.isEditingFile
+                    ? `
+                      <button data-action="save-file">SAVE</button>
+                      <button class="danger" data-action="cancel-edit">CANCEL</button>
+                    `
+                    : `<button data-action="start-edit">EDIT</button>`
+                  }
+                </div>
+              ` : ""}
+            </div>
+
+            ${
+              isAdmin && state.isEditingFile
+              ? `<textarea id="fileContentEditor" style="min-height:340px;">${esc(state.currentFileContent || "")}</textarea>`
+              : `<pre>${esc(state.currentFileContent || "")}</pre>`
+            }
+          </div>
+
+          ${noteVisible ? `
+            <div class="box">
+              <div class="box-head">
+                <h3>ADMIN NOTES</h3>
+                ${isAdmin ? `<button data-action="save-note">SAVE NOTE</button>` : ""}
+              </div>
+              ${
+                isAdmin
+                ? `<textarea id="noteEditor" style="min-height:180px;">${esc(state.currentEditNote || "")}</textarea>`
+                : `<pre>${esc((selected && state.customNotes[selected]) || "")}</pre>`
+              }
+            </div>
+          ` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+
+  wireMainEvents();
+
+  if (isAdmin && state.isEditingFile) {
+    const ed = document.getElementById("fileContentEditor");
+    if (ed) {
+      ed.addEventListener("input", (e) => {
+        state.currentFileContent = e.target.value;
+      });
+    }
+  }
+
+  if (isAdmin && dialogOpen) {
+    const noteEd = document.getElementById("noteEditor");
+    if (noteEd) {
+      noteEd.addEventListener("input", (e) => {
+        state.currentEditNote = e.target.value;
+      });
+    }
+  }
+
+  const backdrop = document.getElementById("dialogBackdrop");
+  if (backdrop) {
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) closeDialog();
+    });
+  }
+}
+
+function wireMainEvents(){
+  document.querySelectorAll("[data-action]").forEach((el) => {
+    el.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const action = el.dataset.action;
+
+      if (action === "logout") return logout();
+      if (action === "switch-db") return switchDb();
+      if (action === "add-entry") return addEntry();
+      if (action === "close-dialog") return closeDialog();
+
+      if (action === "toggle-category") return toggleCategory(el.dataset.category);
+      if (action === "toggle-subdivision") return toggleSubdivision(el.dataset.category, el.dataset.subdivision);
+      if (action === "open-file") return openFile(el.dataset.file);
+
+      if (action === "add-subdivision-or-file") return addSubdivisionOrFile(el.dataset.category);
+      if (action === "delete-category") return removeCategory(el.dataset.category);
+      if (action === "add-file") return addFile(el.dataset.category, el.dataset.subdivision);
+      if (action === "delete-subdivision") return removeSubdivision(el.dataset.category, el.dataset.subdivision);
+      if (action === "delete-file") return removeFile(el.dataset.category, el.dataset.subdivision || null, el.dataset.file);
+
+      if (action === "start-edit") {
+        state.isEditingFile = true;
+        render();
+        return;
+      }
+
+      if (action === "cancel-edit") {
+        if (state.selectedFile) {
+          return openFile(state.selectedFile);
+        }
+        state.isEditingFile = false;
+        render();
+        return;
+      }
+
+      if (action === "save-file") return saveFileContent();
+      if (action === "save-note") return saveAdminNote();
+    });
+  });
+}
+
+function render(){
+  if(!state.authenticated){
+    renderLogin();
+  }else{
+    renderMain();
+  }
+}
+
+loadState();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/")
+def index():
+    return render_template_string(HTML)
+
+
+@app.get("/api/state")
+def api_state():
+    data = load_data()
+    return jsonify({
+        "ok": True,
+        "state": {
+            "authenticated": logged_in(),
+            "is_admin": is_admin(),
+            "username": session.get("username", ""),
+            "active_db": session.get("active_db", "TOA"),
+            "databases": data["databases"],
+            "customNotes": data["customNotes"],
+            "fileContents": data["fileContents"],
+        }
+    })
+
+
+@app.post("/api/login")
+def api_login():
+    body = request.get_json(silent=True) or {}
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    if username == "ADMIN" and password == "TheWraith!13":
+        session["authenticated"] = True
+        session["is_admin"] = True
+        session["username"] = username
+        session["active_db"] = "TOA"
+        msg = "ADMINISTRATIVE ACCESS GRANTED"
+    elif username == "TOA Terminal" and password == "Paer-X":
+        session["authenticated"] = True
+        session["is_admin"] = False
+        session["username"] = username
+        session["active_db"] = "TOA"
+        msg = "ACCESS GRANTED: TOA"
+    elif username == "BV Terminal" and password == "Echo-Walker":
+        session["authenticated"] = True
+        session["is_admin"] = False
+        session["username"] = username
+        session["active_db"] = "BV"
+        msg = "ACCESS GRANTED: BV"
+    else:
+        return jsonify({"ok": False, "error": "ACCESS DENIED: INVALID CREDENTIALS"}), 401
+
+    data = load_data()
+    return jsonify({
+        "ok": True,
+        "message": msg,
+        "state": {
+            "authenticated": True,
+            "is_admin": session["is_admin"],
+            "username": session["username"],
+            "active_db": session["active_db"],
+            "databases": data["databases"],
+            "customNotes": data["customNotes"],
+            "fileContents": data["fileContents"],
+        }
+    })
+
+
+@app.post("/api/logout")
+def api_logout():
+    session.clear()
+    data = load_data()
+    return jsonify({
+        "ok": True,
+        "message": "SYSTEM LOGOUT",
+        "state": {
+            "authenticated": False,
+            "is_admin": False,
+            "username": "",
+            "active_db": "TOA",
+            "databases": data["databases"],
+            "customNotes": data["customNotes"],
+            "fileContents": data["fileContents"],
+        }
+    })
+
+
+@app.post("/api/switch_db")
+def api_switch_db():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    active_db = body.get("active_db", "TOA")
+    if active_db not in ("TOA", "BV"):
+        return jsonify({"ok": False, "error": "INVALID DATABASE"}), 400
+
+    session["active_db"] = active_db
+    data = load_data()
+    return jsonify({
+        "ok": True,
+        "state": {
+            "authenticated": True,
+            "is_admin": True,
+            "username": session.get("username", "ADMIN"),
+            "active_db": active_db,
+            "databases": data["databases"],
+            "customNotes": data["customNotes"],
+            "fileContents": data["fileContents"],
+        }
+    })
+
+
+@app.get("/api/file/<path:file_name>")
+def api_get_file(file_name: str):
+    auth_err = require_login()
+    if auth_err:
+        return auth_err
+
+    data = load_data()
+    ensure_file_content(data, file_name)
+    save_data(data)
+
+    return jsonify({
+        "ok": True,
+        "file_name": file_name,
+        "file_content": data["fileContents"].get(
+            file_name,
+            f"[FILE: {file_name}]\n\nNo archived text currently exists for this file."
+        ),
+        "note": data["customNotes"].get(file_name, ""),
+    })
+
+
+@app.post("/api/file/<path:file_name>/content")
+def api_set_file_content(file_name: str):
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    content = body.get("content", "")
+
+    data = load_data()
+    data["fileContents"][file_name] = content
+    save_data(data)
+
+    return jsonify({"ok": True})
+
+
+@app.post("/api/file/<path:file_name>/note")
+def api_set_file_note(file_name: str):
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    note = body.get("note", "")
+
+    data = load_data()
+    data["customNotes"][file_name] = note
+    save_data(data)
+
+    return jsonify({"ok": True})
+
+
+@app.post("/api/add/category")
+def api_add_category():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    if not category:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    data["databases"][active_db][category] = {
+        "icon": "Folder",
+        "subdivisions": {},
+        "files": [],
+    }
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/add/subdivision")
+def api_add_subdivision():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    subdivision = body.get("subdivision", "").strip()
+
+    if not category or not subdivision:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY OR SUBDIVISION"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    db = data["databases"][active_db]
+    if category not in db:
+        return jsonify({"ok": False, "error": "CATEGORY NOT FOUND"}), 404
+
+    db[category].setdefault("subdivisions", {})
+    db[category]["subdivisions"][subdivision] = []
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/add/file")
+def api_add_file():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    subdivision = body.get("subdivision")
+    file_name = body.get("file_name", "").strip()
+
+    if not category or not file_name:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY OR FILE NAME"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    db = data["databases"][active_db]
+
+    if category not in db:
+        return jsonify({"ok": False, "error": "CATEGORY NOT FOUND"}), 404
+
+    ensure_file_content(data, file_name)
+
+    if subdivision:
+        db[category].setdefault("subdivisions", {})
+        db[category]["subdivisions"].setdefault(subdivision, [])
+        db[category]["subdivisions"][subdivision].append(file_name)
+    else:
+        db[category].setdefault("files", [])
+        db[category]["files"].append(file_name)
+
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/delete/category")
+def api_delete_category():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    if not category:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    data["databases"][active_db].pop(category, None)
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/delete/subdivision")
+def api_delete_subdivision():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    subdivision = body.get("subdivision", "").strip()
+
+    if not category or not subdivision:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY OR SUBDIVISION"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    db = data["databases"][active_db]
+
+    if category not in db:
+        return jsonify({"ok": False, "error": "CATEGORY NOT FOUND"}), 404
+
+    db[category].setdefault("subdivisions", {})
+    db[category]["subdivisions"].pop(subdivision, None)
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+@app.post("/api/delete/file")
+def api_delete_file():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    body = request.get_json(silent=True) or {}
+    category = body.get("category", "").strip()
+    subdivision = body.get("subdivision")
+    file_name = body.get("file_name", "").strip()
+
+    if not category or not file_name:
+        return jsonify({"ok": False, "error": "MISSING CATEGORY OR FILE NAME"}), 400
+
+    data = load_data()
+    active_db = session.get("active_db", "TOA")
+    db = data["databases"][active_db]
+
+    if category not in db:
+        return jsonify({"ok": False, "error": "CATEGORY NOT FOUND"}), 404
+
+    if subdivision:
+        db[category].setdefault("subdivisions", {})
+        files = db[category]["subdivisions"].get(subdivision, [])
+        db[category]["subdivisions"][subdivision] = [f for f in files if f != file_name]
+    else:
+        files = db[category].get("files", [])
+        db[category]["files"] = [f for f in files if f != file_name]
+
+    save_data(data)
+    return jsonify({"ok": True})
+
+
+init_db()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
