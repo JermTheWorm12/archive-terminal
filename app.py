@@ -11,7 +11,8 @@ import psycopg2
 from psycopg2.extras import Json
 
 app = Flask(__name__)
-app.secret_key = "replace-this-with-a-random-secret-key"
+import secrets
+app.secret_key = secrets.token_hex(32)
 
 DATA_FILE = "archive_data.json"
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -1111,6 +1112,16 @@ def api_admin_delete_user():
         session["view_as"] = ""
     save_data(data)
     return jsonify({"ok": True})
+
+
+@app.get("/api/admin/backup")
+def backup():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+
+    data = load_data()
+    return jsonify(data)
 
 
 if __name__ == "__main__":
