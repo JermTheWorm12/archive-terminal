@@ -1030,6 +1030,15 @@ def api_admin_delete_user():
     save_data(data)
     return jsonify({"ok": True})
 
+@app.get("/api/admin/export_raw")
+def api_admin_export_raw():
+    auth_err = require_admin()
+    if auth_err:
+        return auth_err
+        
+    data = load_data()
+    return jsonify(data)
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
