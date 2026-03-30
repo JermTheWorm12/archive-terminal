@@ -392,6 +392,15 @@ def load_json_fallback() -> dict[str, Any]:
         if k not in loaded:
             loaded[k] = deepcopy(v)
 
+    loaded.setdefault("databases", {})
+    for db_name, db_value in INITIAL_DATABASES.items():
+        if db_name not in loaded["databases"]:
+            loaded["databases"][db_name] = deepcopy(db_value)
+    
+    loaded.setdefault("customNotes", {})
+    loaded.setdefault("fileContents", {})
+    loaded.setdefault("suggestions", [])
+    
     for name, text in INITIAL_FILE_DETAILS.items():
         loaded["fileContents"].setdefault(name, text)
 
